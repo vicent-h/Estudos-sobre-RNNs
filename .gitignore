@@ -1,8 +1,6 @@
 rnn_bpe/models/
 rnn_bpe/runs/
-rnn_bpe/artifacts/
 rnn_caracter/models/
 rnn_caracter/runs/
 rnn_caracter/inf/
-rnn_caracter/artifacts/*.pq
 *.pt
