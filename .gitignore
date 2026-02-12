@@ -2,3 +2,4 @@ rnn_bpe/models/
 rnn_bpe/runs/
 rnn_caracter/models/
 rnn_caracter/runs/
+rnn_caracter/inf
