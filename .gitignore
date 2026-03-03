@@ -4,3 +4,8 @@ rnn_caracter/models/
 rnn_caracter/runs/
 rnn_caracter/inf/
 *.pt
+.venv/
+*/runs/*
+*/models/*
+*/artifacts/*
+*.json
