@@ -9,3 +9,4 @@ rnn_caracter/inf/
 */models/*
 */artifacts/*
 *.json
+*.pq
