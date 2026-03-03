@@ -4,12 +4,13 @@ import torch.nn as nn
 from tokenizers import Tokenizer
 from typing import List, Tuple
 import pandas as pd
-from lstm import LSTM, LSTMPad
+from lstm import LSTM
 from torch.optim import Adam
 from torch.utils.tensorboard import SummaryWriter
 from utils import Dataset, train
 import os
 import json
+import time
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Treinamento de LSTM com BPE")
@@ -18,9 +19,12 @@ def parse_args():
     parser.add_argument("--vocab_size", type=int, default=5000)
     parser.add_argument("--max_len", type=int, default=200)
     parser.add_argument("--lstm_emb_size", type=int, default=256)
-    parser.add_argument("--lstm_hidden_size", type=int, default=512)
-    parser.add_argument("--lstm_num_layers", type=int, default=4)
-    parser.add_argument("--lstm_dropout", type=float, default=0.0)
+    parser.add_argument("--encoder_hidden_size", type=int, default=512)
+    parser.add_argument("--encoder_num_layers", type=int, default=4)
+    parser.add_argument("--encoder_dropout", type=float, default=0.0)
+    parser.add_argument("--decoder_hidden_size", type=int, default=512)
+    parser.add_argument("--decoder_num_layers", type=int, default=4)
+    parser.add_argument("--decoder_dropout", type=float, default=0.0)
 
     # parâmetros de treino
     parser.add_argument("--batch_size", type=int, default=64)
@@ -43,10 +47,13 @@ if __name__ == "__main__":
     config = {
         'vocab_size': args.vocab_size,
         'max_len': args.max_len,
-        'lstm_emb_size': args.lstm_emb_size,
-        'lstm_hidden_size': args.lstm_hidden_size,
-        'lstm_num_layers': args.lstm_num_layers,
-        'lstm_dropout': args.lstm_dropout,
+        'emb_size': args.lstm_emb_size,
+        'encoder_hidden_size': args.encoder_hidden_size,
+        'encoder_num_layers': args.encoder_num_layers,
+        'encoder_dropout': args.encoder_dropout,
+        'decoder_hidden_size': args.decoder_hidden_size,
+        'decoder_num_layers': args.decoder_num_layers,
+        'decoder_dropout': args.decoder_dropout,
         'batch_size': args.batch_size,
         'eval_batch_size': args.eval_batch_size,
         'accum_steps': args.accum_steps,
@@ -62,6 +69,7 @@ if __name__ == "__main__":
         'accum_steps': 0,
         'loss_sum': 0,
         'eval_loss_sum': 0,
+        'eval_loss_tf_sum': 0,
         'eval_steps': 0,
         'global_steps': 0,
         'best_eval_loss': torch.inf,
@@ -69,34 +77,35 @@ if __name__ == "__main__":
     }
 
     print(config)
+    # print('Esperando 20 minutos')
+    # time.sleep(20*60)
 
     print('Carregando tokenizador e textos')
     tokenizer = Tokenizer.from_file(f"artifacts/bpe_{config['vocab_size']}.json")
-    df_train = pd.read_parquet('../data/train_wiki_cleaned_cutted.pq')
-    df_eval = pd.read_parquet('../data/eval_wiki_cleaned_cutted.pq')
+    df_train = pd.read_parquet('data/train_wiki_cleaned_cutted.pq')
+    df_eval = pd.read_parquet('data/eval_wiki_cleaned_cutted.pq')
 
     print('Preparando dataset e dataloader')
-    dataset_train = Dataset(df_train.text_cut.values.tolist(), tokenizer, config['max_len'])
-    dataset_eval = Dataset(df_eval.text_cut.values.tolist(), tokenizer, config['max_len'])
+    dataset_train = Dataset(df_train.tokens.values.tolist(), config['max_len'])
+    dataset_eval = Dataset(df_eval.tokens.values.tolist(), config['max_len'])
 
     dataloader_train = torch.utils.data.DataLoader(dataset_train, batch_size=config['batch_size'], shuffle=True)
     dataloader_eval = torch.utils.data.DataLoader(dataset_eval, batch_size=config['eval_batch_size'], shuffle=True)
 
     print('Declarando modelo, otimizador e writer')
-    model = LSTMPad(
+    model = LSTM(
+        config['emb_size'],
         config['vocab_size'],
-        config['lstm_emb_size'],
-        config['lstm_num_layers'],
-        config['lstm_hidden_size'],
-        config['lstm_dropout']
+        config['encoder_num_layers'],
+        config['encoder_hidden_size'],
+        config['encoder_dropout'],
+        config['decoder_num_layers'],
+        config['decoder_hidden_size'],
+        config['decoder_dropout']
     ).to(config['device'])
 
     optimizer = Adam(model.parameters(), lr=config['learning_rate'])
     writer = SummaryWriter(log_dir=f'runs/{config['exp_name']}')
-
-    n_parameters = sum(p.numel() for p in model.parameters())
-
-    config['parameters'] = n_parameters
 
     os.makedirs(f'models/{config['exp_name']}', exist_ok=True)
 
