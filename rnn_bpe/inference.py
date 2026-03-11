@@ -197,6 +197,7 @@ def test_step(config, step_info, model, dataloader, vocab_size, tok: Tokenizer):
 def predicting(
     initial_text: str,
     model,
+    json_sampling,
     max_len,
     tok,
     eos_penalty_base: float,
@@ -205,6 +206,9 @@ def predicting(
     device="cpu"
 ):
     model.eval()
+
+    temperature = temperature if temperature else json_sampling['temperature']
+    k = k if k else json_sampling['k']
 
     eos_id = tok.token_to_id("[EOS]")
 
@@ -224,11 +228,7 @@ def predicting(
 
             logits_step = logits[:, -1, :]  # último token
             logits_step = logits_step.squeeze(0)
-
-            # penalização mais estável
-            # penalty = eos_penalty_base * (1 - i / max_len)
-            # logits_step[eos_id] -= penalty
-
+            
             logits_step = logits_step / temperature
 
             probs = torch.softmax(logits_step, dim=-1)
