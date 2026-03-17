@@ -150,7 +150,7 @@ def optimize(
         model_name, 
         num_options: int = 20,
         len_initial_texts = 256,
-        batch_size = 256
+        batch_size = 128
     ):
     options: List[dict] = list()
     config_test = {
@@ -163,7 +163,7 @@ def optimize(
 
 
     for _ in range(num_options):
-        option = {'temperature': float(random.choice(np.arange(0.5, 1.6, 0.1))),
+        option = {'temperature': float(random.choice(np.arange(0.1, 1.6, 0.1))),
              'k': int(random.choice(np.arange(1, 10)))}
         
         metric = generate(
@@ -181,11 +181,25 @@ def optimize(
 
     return options, best_option
 
+def _read_models_result():
+    models_result = {}
+    try:
+        with open('artifacts/tunning_sampling_results.json', 'r', encoding='utf-8') as f:
+            models_result = json.load(f)
+        print('Arquivo de resultados lido com sucesso')
+    except Exception as e:
+        print(e)
+        pass
+    return models_result
+
 def optimize_multiple_models(num_options=20):
     models_list = ['v2', 'v3', 'v4', 'v5', 'v6', 'v7', 'v8', 'v9', 'v10']
-    models_result = {}
+    models_result = _read_models_result()
 
     for model in tqdm(models_list, desc='Optimizing'):
+        if(model in list(models_result.keys())):
+            print(f'A {model} já possui resultados')
+            continue
         options, best_option = optimize(model, num_options)
         print(f'Best option for {model=}: {best_option}')
         models_result[model] = {
