@@ -7,7 +7,7 @@ import pandas as pd
 from lstm import LSTMBidirectional, LSTM
 from torch.optim import Adam
 from torch.utils.tensorboard import SummaryWriter
-from utils import Dataset, train, LinearWarmupScheduler, log_gradient_norms
+from utils import Dataset, LinearWarmupScheduler, log_gradient_norms
 import os
 import json
 import time
@@ -55,8 +55,9 @@ def train_step(
     if states is not None:
         states = (states[0].detach(), states[1].detach())
 
+@torch.no_grad()
 def eval_step(
-    model: LSTM
+    model: LSTMBidirectional
     , config: dict
     , step_info: dict
     , dataloader: Tuple[torch.Tensor, torch.Tensor]
@@ -64,55 +65,29 @@ def eval_step(
     model.eval()
     logits: torch.Tensor
 
-    with torch.no_grad():
-        for batch in tqdm(dataloader, total=len(dataloader), desc='Evaluating'):
-            input, out = batch
-            input = input.to(config['device'])
-            out = out.to(config['device']) # batch_size, seq_len
-            decoder_input = out[:, :-1]
+    for batch in tqdm(dataloader, total=len(dataloader), desc='Evaluating'):
+        input, out = batch
+        input = input.to(config['device'])
+        out = out.to(config['device']) # batch_size, seq_len
+        decoder_input = out[:, :-1]
 
-            n_tokens = out.size(1)
-            states: Tuple[torch.Tensor, torch.Tensor] = None
+        states: Tuple[torch.Tensor, torch.Tensor] = None
 
-            all_logits = []
+        logits_tf, states = model(input, decoder_input, None)
+        loss_tf = nn.functional.cross_entropy(
+            logits_tf.reshape(-1, config['vocab_size']),
+            out[:, 1:].reshape(-1),
+            ignore_index=0
+        )
 
-            encoded, states = model.encode(input, states)
-            logits, states = model.decode(out[:, :1], encoded, states)
-            all_logits.append(logits)
+        step_info['eval_loss_tf_sum'] += loss_tf.item()
+        step_info['eval_batches'] += 1
 
-            next_token = torch.argmax(logits[:, -1, :], dim=-1).unsqueeze(1)
-            for _ in range(1, n_tokens-1):
-                logits, states = model.decode(next_token.detach(), encoded, states)
-                all_logits.append(logits)
-
-                next_token = torch.argmax(logits[:, -1, :], dim=-1).unsqueeze(1)
-
-            
-            logits_full = torch.cat(all_logits, dim=1)
-            loss = nn.functional.cross_entropy(
-                logits_full.reshape(-1, config['vocab_size']),
-                out[:, 1:].reshape(-1),
-                ignore_index=0
-            )
-
-
-            states = (states[0].detach(), states[1].detach())
-            logits_tf, states = model(input, decoder_input, None)
-            loss_tf = nn.functional.cross_entropy(
-                logits_tf.reshape(-1, config['vocab_size']),
-                out[:, 1:].reshape(-1),
-                ignore_index=0
-            )
-
-            step_info['eval_loss_sum'] += loss.item()
-            step_info['eval_loss_tf_sum'] += loss_tf.item()
-            step_info['eval_batches'] += 1
-
-            states = (states[0].detach(), states[1].detach())
+        states = (states[0].detach(), states[1].detach())
 
 
 def train(
-    model: LSTM
+    model: LSTMBidirectional
     , optimizer: Adam
     , config: dict
     , step_info: dict
@@ -150,17 +125,14 @@ def train(
                 if(step_info['global_steps'] % config['eval_steps'] == 0 and step_info['global_steps'] > 0):
                     eval_step(model, config, step_info, dataloader_eval)
 
-                    avg_loss_eval = step_info['eval_loss_sum'] / step_info['eval_batches']
                     avg_loss_eval_tf = step_info['eval_loss_tf_sum'] / step_info['eval_batches']
-                    writer.add_scalar('loss/eval', avg_loss_eval, step_info['global_steps'])
                     writer.add_scalar('loss/eval_tf', avg_loss_eval_tf, step_info['global_steps'])
 
-                    step_info['eval_loss_sum'] = 0
                     step_info['eval_loss_tf_sum'] = 0
                     step_info['eval_batches'] = 0
 
-                    if(avg_loss_eval < step_info['best_eval_loss']):
-                        step_info['best_eval_loss'] = avg_loss_eval
+                    if(avg_loss_eval_tf < step_info['best_eval_loss']):
+                        step_info['best_eval_loss'] = avg_loss_eval_tf
 
                     torch.save(model.state_dict(), f'models/{config['exp_name']}/model.pt')
 

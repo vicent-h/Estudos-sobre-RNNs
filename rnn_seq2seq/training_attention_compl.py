@@ -4,13 +4,12 @@ import torch.nn as nn
 from tokenizers import Tokenizer
 from typing import List, Tuple
 import pandas as pd
-from lstm import LSTMBidirectional, LSTM
+from lstm import LSTMAttentionCompl, LSTM
 from torch.optim import Adam
 from torch.utils.tensorboard import SummaryWriter
-from utils import Dataset, train, LinearWarmupScheduler, log_gradient_norms
+from utils import Dataset, LinearWarmupScheduler, log_gradient_norms
 import os
 import json
-import time
 from tqdm import tqdm
 
 
@@ -250,7 +249,7 @@ if __name__ == "__main__":
     dataloader_eval = torch.utils.data.DataLoader(dataset_eval, batch_size=config['eval_batch_size'], shuffle=True)
 
     print('Declarando modelo, otimizador e writer')
-    model = LSTMBidirectional(
+    model = LSTMAttentionCompl(
         config['emb_size'],
         config['vocab_size'],
         config['encoder_num_layers'],
@@ -263,7 +262,7 @@ if __name__ == "__main__":
 
     optimizer = Adam(model.parameters(), lr=config['learning_rate'])
     writer = SummaryWriter(log_dir=f'runs/{config['exp_name']}')
-    scheduler = LinearWarmupScheduler(config['warmup_steps'], optimizer, total_steps=1_000_000)
+    scheduler = LinearWarmupScheduler(config['warmup_steps'], optimizer, total_steps=500_000)
 
     os.makedirs(f'models/{config['exp_name']}', exist_ok=True)
 
@@ -281,3 +280,6 @@ if __name__ == "__main__":
         writer,
         scheduler
     )
+
+
+

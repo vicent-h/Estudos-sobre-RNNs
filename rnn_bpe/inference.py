@@ -7,6 +7,8 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 from utils import Tokenizer
+from tunning_sampling import sampling, _metric
+from typing import List
 
 def evaluate_models(df):
 
@@ -192,6 +194,67 @@ def test_step(config, step_info, model, dataloader, vocab_size, tok: Tokenizer):
         step_info['test_accum_steps'] = 0
 
         return avg_loss, phrases_pred, phrases_input, tokens_pred_total, tokens_input_total
+    
+
+@torch.no_grad()
+def test_step_with_sampling(
+    config, 
+    model, 
+    dataloader, 
+    tokenizer: Tokenizer,
+    option
+):
+
+    model.eval()
+
+    total_metric = 0.0
+    num_batches = 0
+
+    for batch in dataloader:
+
+        input_tokens, target_tokens = batch
+
+        input_tokens: torch.Tensor = input_tokens.to(config['device'])
+        target_tokens: torch.Tensor = target_tokens.to(config['device'])
+
+        states: List[: torch.Tensor] = None
+
+        # prefixo inicial
+        prefix = input_tokens
+
+        logits, states = model(prefix, states)
+
+        generated_tokens = []
+        all_logits = []
+
+        for _ in range(target_tokens.shape[1]):
+
+            logits = logits[:, -1, :] # [B, L, vocab_size] -> [B, 1, vocab_size]
+
+            next_token = sampling(logits, option)
+
+            generated_tokens.append(next_token)
+
+            logits, states = model(next_token, states)
+            all_logits.append(logits)
+
+
+        all_logits = torch.concat(all_logits, dim=1)
+        pred_tokens = torch.cat(generated_tokens, dim=-1)
+
+        # Decode batch predictions and targets
+        pred_texts = tokenizer.decode_batch(pred_tokens.tolist())
+        target_texts = tokenizer.decode_batch(target_tokens.tolist())
+        input_text = tokenizer.decode_batch(input_tokens.tolist())
+
+        all_logits = all_logits.view(-1, tokenizer.get_vocab_size()) # Batch*Seq Len, Vocab Size
+        target_tokens = target_tokens.view(-1)
+
+        total_loss = nn.functional.cross_entropy(all_logits, target_tokens, ignore_index=0)
+
+
+    return total_loss, pred_texts, input_text, pred_tokens.tolist(), input_tokens.tolist()
+    
     
 
 def predicting(

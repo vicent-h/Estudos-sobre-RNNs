@@ -130,7 +130,7 @@ def _get_best_option(options):
 
 def _get_dataloader(tokenizer, config_test):
     # print('Lendo dataloader')
-    df_test = pd.read_parquet('/media/alvarinho/dados/Estudos/data/test_wiki_cleaned_cutted.pq')
+    df_test = pd.read_parquet('/media/alvarinho/dados/Estudos/data/eval_wiki_cleaned_cutted.pq')
 
     dataset_test = Dataset(
         df_test.text_cut.values.tolist(),
@@ -150,37 +150,42 @@ def optimize(
         model_name, 
         num_options: int = 20,
         len_initial_texts = 256,
-        batch_size = 128
+        batch_size = 256
     ):
     options: List[dict] = list()
-    config_test = {
-        'batch_size': batch_size
-    }
+    batch_sizes = [256, 128, 64]
+    for batch_size in batch_sizes:
+        try:
+            config_test = {
+                'batch_size': batch_size
+            }
+            
 
-    model, config = _read_model(model_name)
-    tokenizer = _read_tokenizer(config)
-    dataloader = _get_dataloader(tokenizer, config_test)
-
-
-    for _ in range(num_options):
-        option = {'temperature': float(random.choice(np.arange(0.1, 1.6, 0.1))),
-             'k': int(random.choice(np.arange(1, 10)))}
-        
-        metric = generate(
-            model, config,
-            option, tokenizer, 
-            dataloader, len_initial_texts
-        )
-
-        option['metric'] = metric
-
-        options.append(option)
+            model, config = _read_model(model_name)
+            tokenizer = _read_tokenizer(config)
+            dataloader = _get_dataloader(tokenizer, config_test)
 
 
-    best_option = _get_best_option(options)
+            for _ in range(num_options):
+                option = {'temperature': float(random.choice(np.arange(0.1, 1.6, 0.1))),
+                    'k': int(random.choice(np.arange(1, 10)))}
+                
+                metric = generate(
+                    model, config,
+                    option, tokenizer, 
+                    dataloader, len_initial_texts
+                )
 
-    return options, best_option
+                option['metric'] = metric
 
+                options.append(option)
+
+
+            best_option = _get_best_option(options)
+
+            return options, best_option
+        except Exception:
+            pass
 def _read_models_result():
     models_result = {}
     try:
