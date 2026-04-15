@@ -41,12 +41,13 @@ class LSTM(nn.Module):
         
         memory = self.encode(input, states)
         logits, (h, c) = self.decode(output, memory)
+        
         return logits, (h, c)
     
     def encode(self, input, states=None):
         x_embedded = self.embedding(input)
-        _, memory = self.LSTMEncoder(x_embedded, states)
-        return memory
+        _, (h, c) = self.LSTMEncoder(x_embedded, states)
+        return (h, c)
     
     def decode(self, output, memory):
         y_embedded = self.embedding(output)

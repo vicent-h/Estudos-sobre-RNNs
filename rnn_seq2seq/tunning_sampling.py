@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from lstm import LSTM
+from lstm import LSTM, LSTMBidirectional, LSTMAttention
 import json
 from rouge_score import rouge_scorer
 from tqdm import tqdm
@@ -10,27 +10,34 @@ import random
 import numpy as np
 import pandas as pd
 from utils import Dataset
+import traceback
 
 scorer = rouge_scorer.RougeScorer(
     ['rouge2'],
     use_stemmer=True
 )
 
+models_retry = [LSTM, LSTMBidirectional, LSTMAttention]
 def _read_model(model_name):
     # print('Lendo o modelo')
     with open(f"models/{model_name}/config.json", "r", encoding="utf-8") as f:
         config: dict = json.load(f)
-    model = LSTM(
-        config['vocab_size'],
-        config['lstm_emb_size'],
-        config['lstm_num_layers'],
-        config['lstm_hidden_size'],
-        config['lstm_dropout']
-    ).to(config['device'])
-    try:
-        model.load_state_dict(torch.load(f"models/{model_name}/model.pt", map_location=config['device']))
-    except Exception as e:
-        print(model_name, e)
+    for M in models_retry:
+        try:
+            model = M(
+                config['emb_size'],
+                config['vocab_size'],
+                config['encoder_num_layers'],
+                config['encoder_hidden_size'],
+                config['encoder_dropout'],
+                config['decoder_num_layers'],
+                config['decoder_hidden_size'],
+                config['decoder_dropout']
+            ).to(config['device'])
+            model.load_state_dict(torch.load(f"models/{model_name}/model.pt", map_location=config['device']))
+            break
+        except Exception as e:
+            continue
     return model, config
 
 def _read_tokenizer(config):
@@ -61,12 +68,12 @@ def sampling(logits, option):
 
 @torch.no_grad()
 def generate(
+    model_name: str,
     model: nn.Module,
     config: dict,
     option: dict,
     tokenizer: Tokenizer,
     dataloader: torch.utils.data.DataLoader,
-    len_initial_text=10
 ):
 
     model.eval()
@@ -84,13 +91,18 @@ def generate(
         states: List[: torch.Tensor] = None
 
         # prefixo inicial
-        prefix = input_tokens[:, :len_initial_text]
 
-        logits, states = model(prefix, states)
+        if 'attention' in model_name:
+            encoded, states = model.encode(input_tokens, states)
+            logits, states = model.decode(target_tokens[:, :1], encoded, states)
+        else:
+            states = model.encode(input_tokens, states)
+            logits, states = model.decode(target_tokens[:, :1], states)
+
 
         generated_tokens = []
 
-        for _ in range(target_tokens.shape[1]):
+        for i in range(target_tokens.shape[1]):
 
             logits = logits[:, -1, :] # [B, L, vocab_size] -> [B, 1, vocab_size]
 
@@ -98,7 +110,11 @@ def generate(
 
             generated_tokens.append(next_token)
 
-            logits, states = model(next_token, states)
+            if 'attention' in model_name:
+                logits, states = model.decode(target_tokens[:, i:i+1], encoded, states)
+            else:
+                logits, states = model.decode(target_tokens[:, i:i+1], states)
+
 
         pred_tokens = torch.cat(generated_tokens, dim=-1)
 
@@ -130,12 +146,11 @@ def _get_best_option(options):
 
 def _get_dataloader(tokenizer, config_test):
     # print('Lendo dataloader')
-    df_test = pd.read_parquet('/media/alvarinho/dados/Estudos/data/eval_wiki_cleaned_cutted.pq')
+    df_test = pd.read_parquet('data/eval_wiki_cleaned_cutted.pq')
 
     dataset_test = Dataset(
-        df_test.text_cut.values.tolist(),
-        tokenizer,
-        max_len=200
+        df_test.tokens.values.tolist(),
+        max_len=512
     )
 
     dataloader_test = torch.utils.data.DataLoader(
@@ -153,7 +168,7 @@ def optimize(
         batch_size = 256
     ):
     options: List[dict] = list()
-    batch_sizes = [256, 128, 64]
+    batch_sizes = [64, 32, 16, 8]
     for batch_size in batch_sizes:
         try:
             config_test = {
@@ -171,9 +186,9 @@ def optimize(
                     'k': int(random.choice(np.arange(1, 10)))}
                 
                 metric = generate(
-                    model, config,
+                    model_name, model, config,
                     option, tokenizer, 
-                    dataloader, len_initial_texts
+                    dataloader
                 )
 
                 option['metric'] = metric
@@ -184,7 +199,9 @@ def optimize(
             best_option = _get_best_option(options)
 
             return options, best_option
-        except Exception:
+        except Exception as e:
+            traceback.print_exc()
+            print(e)
             pass
 def _read_models_result():
     models_result = {}
@@ -197,8 +214,11 @@ def _read_models_result():
         pass
     return models_result
 
-def optimize_multiple_models(num_options=20):
-    models_list = ['v2', 'v3', 'v4', 'v5', 'v6', 'v7', 'v8', 'v9', 'v10']
+def optimize_multiple_models(num_options=100):
+    models_list = [
+        'v1', 'v2', 'v3_bidirectional', 'v4_bidirectional_warmup', 'v5_attention', 
+        'v6_attention_decoder_too', 'v7_bidirectional_warmup'
+    ]
     models_result = _read_models_result()
 
     for model in tqdm(models_list, desc='Optimizing'):

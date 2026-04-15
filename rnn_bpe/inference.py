@@ -253,7 +253,7 @@ def test_step_with_sampling(
         total_loss = nn.functional.cross_entropy(all_logits, target_tokens, ignore_index=0)
 
 
-    return total_loss, pred_texts, input_text, pred_tokens.tolist(), input_tokens.tolist()
+    return total_loss, pred_texts, target_texts, input_text, pred_tokens.tolist(), input_tokens.tolist()
     
     
 

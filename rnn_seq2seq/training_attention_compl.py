@@ -110,6 +110,89 @@ def eval_step(
             states = (states[0].detach(), states[1].detach())
 
 
+def test_step_attention(config, step_info, model, dataloader, vocab_size, tok: Tokenizer):
+    model.eval()
+    phrases_pred, tokens_pred_total = [], []
+    phrases_input, tokens_input_total = [], []
+    phrases_output, tokens_output_total = [], []
+    with torch.no_grad():
+        for batch in tqdm(dataloader, total=len(dataloader), desc='Testing'):
+            input, out = batch
+            input = input.to(config['device'])
+            out = out.to(config['device']) # batch_size, seq_len
+            decoder_input = out[:, :-1]
+
+            n_tokens = out.size(1)
+            states = None
+
+            all_logits = []
+
+            encoded, states = model.encode(input, states)
+            logits, states = model.decode(out[:, :1], encoded, states)
+            all_logits.append(logits)
+
+            pred_tokens = []
+            next_token = torch.argmax(logits[:, -1, :], dim=-1).unsqueeze(1)
+            pred_tokens.append(next_token)
+            for _ in range(1, n_tokens-1):
+                logits, states = model.decode(next_token.detach(), encoded, states)
+                all_logits.append(logits)
+
+                next_token = torch.argmax(logits[:, -1, :], dim=-1).unsqueeze(1)
+                pred_tokens.append(next_token)
+
+            
+            logits_full = torch.cat(all_logits, dim=1)
+            loss = nn.functional.cross_entropy(
+                logits_full.reshape(-1, config['vocab_size']),
+                out[:, 1:].reshape(-1),
+                ignore_index=0
+            )
+
+
+            states = (states[0].detach(), states[1].detach())
+            logits_tf, states = model(input, decoder_input, None)
+            loss_tf = nn.functional.cross_entropy(
+                logits_tf.reshape(-1, config['vocab_size']),
+                out[:, 1:].reshape(-1),
+                ignore_index=0
+            )
+
+            step_info['test_loss_sum'] += loss.item()
+            step_info['test_loss_tf_sum'] += loss_tf.item()
+            step_info['test_accum_steps'] += 1
+
+            pred_tokens = torch.cat(pred_tokens, dim=-1)
+            for i in range(len(pred_tokens)):
+                p_tokens = pred_tokens[i].tolist()
+                p2_tokens = input[i].tolist()
+                p3_tokens = out[i].tolist()
+
+                p = tok.decode(p_tokens)
+                p2 = tok.decode(p2_tokens)
+                p3 = tok.decode(p3_tokens)
+
+                phrases_pred.append(p)
+                tokens_pred_total.append(p_tokens)
+
+                phrases_input.append(p2)
+                tokens_input_total.append(p2_tokens)
+                
+                phrases_output.append(p3)
+                tokens_output_total.append(p3_tokens)
+
+        avg_loss = step_info['test_loss_sum'] / step_info['test_accum_steps']
+        avg_loss_tf = step_info['test_loss_tf_sum'] / step_info['test_accum_steps']
+        
+        step_info['test_loss_sum'] = 0
+        step_info['test_accum_steps'] = 0
+        step_info['test_accum_steps'] = 0
+
+        return avg_loss, avg_loss_tf, phrases_pred, phrases_input, tokens_pred_total, tokens_input_total, phrases_output, tokens_output_total
+    
+
+
+
 def train(
     model: LSTM
     , optimizer: Adam
